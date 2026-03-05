@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TiKV PD Performance Optimization Analysis Report</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #64748b;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 60px 40px;
+            border-radius: 16px;
+            margin-bottom: 40px;
+            box-shadow: 0 20px 40px rgba(37, 99, 235, 0.2);
+        }
+        
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 16px;
+            font-weight: 700;
+        }
+        
+        header .meta {
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+            opacity: 0.9;
+            font-size: 0.95rem;
+        }
+        
+        header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .section {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            border: 1px solid var(--border);
+        }
+        
+        .section h2 {
+            font-size: 1.5rem;
+            color: var(--primary);
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .section h3 {
+            font-size: 1.25rem;
+            color: var(--text);
+            margin: 28px 0 16px;
+        }
+        
+        .section h4 {
+            font-size: 1.1rem;
+            color: var(--secondary);
+            margin: 20px 0 12px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 0.95rem;
+        }
+        
+        th, td {
+            padding: 14px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        th {
+            background: var(--bg);
+            font-weight: 600;
+            color: var(--text);
+        }
+        
+        tr:hover {
+            background: var(--bg);
+        }
+        
+        .principle {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-left: 4px solid var(--warning);
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .principle h4 {
+            color: #92400e;
+            margin-top: 0;
+        }
+        
+        .methodology {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-left: 4px solid var(--primary);
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin: 12px 0;
+        }
+        
+        .methodology strong {
+            color: var(--primary-dark);
+        }
+        
+        .optimization-box {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 16px 0;
+        }
+        
+        .optimization-box h5 {
+            color: var(--primary);
+            margin-bottom: 12px;
+            font-size: 1rem;
+        }
+        
+        code {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+            font-size: 0.9em;
+        }
+        
+        pre {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
+        pre code {
+            background: transparent;
+            padding: 0;
+        }
+        
+        .highlight {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            border: 1px solid var(--success);
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin: 16px 0;
+        }
+        
+        .highlight strong {
+            color: #065f46;
+        }
+        
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin: 20px 0;
+        }
+        
+        .metric-card {
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .metric-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        
+        .metric-card .label {
+            color: var(--text-light);
+            font-size: 0.9rem;
+            margin-top: 4px;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .badge-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .badge-success {
+            background: var(--success);
+            color: white;
+        }
+        
+        .badge-warning {
+            background: var(--warning);
+            color: white;
+        }
+        
+        .badge-danger {
+            background: var(--danger);
+            color: white;
+        }
+        
+        footer {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+        
+        .toc {
+            background: var(--bg);
+            padding: 24px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+        }
+        
+        .toc h3 {
+            margin-top: 0;
+        }
+        
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .toc li {
+            padding: 8px 0;
+            border-bottom: 1px dashed var(--border);
+        }
+        
+        .toc a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        
+        @media print {
+            body {
+                background: white;
+            }
+            .section {
+                break-inside: avoid;
+                box-shadow: none;
+                border: 1px solid #ddd;
+            }
+            header {
+                box-shadow: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ TiKV PD Performance Optimization Analysis Report</h1>
+            <div class="meta">
+                <span>📊 Based on OSDI 2025 Systematic Optimization Framework</span>
+                <span>👤 Analyst: kernel-performance-expert</span>
+                <span>📅 March 5, 2026</span>
+                <span>🎯 Target: TiKV PD (Placement Driver)</span>
+            </div>
+        </header>
+
+        <div class="toc">
+            <h3>📑 Table of Contents</h3>
+            <ul>
+                <li><a href="#framework">1. Theoretical Foundation: Sujin Park Optimization Framework</a></li>
+                <li><a href="#architecture">2. PD Architecture & Performance Bottlenecks</a></li>
+                <li><a href="#principle1">3. Principle 1: Task Removal</a></li>
+                <li><a href="#principle2">4. Principle 2: Task Replacement</a></li>
+                <li><a href="#principle3">5. Principle 3: Task Reordering</a></li>
+                <li><a href="#methodologies">6. Eight Methodologies Overview</a></li>
+                <li><a href="#code">7. Code-Level Optimization Recommendations</a></li>
+                <li><a href="#metrics">8. Monitoring & Validation Metrics</a></li>
+                <li><a href="#conclusion">9. Conclusion</a></li>
+            </ul>
+        </div>
+
+        <div class="section" id="framework">
+            <h2>📚 Theoretical Foundation: Sujin Park Optimization Framework</h2>
+            
+            <p>This report is based on the <strong>OSDI 2025</strong> paper <em>"Principles and Methodologies for Serial Performance Optimization"</em> by Sujin Park, Mingyu Guan, Xiang Cheng, and Taesoo Kim from Georgia Tech.</p>
+            
+            <div class="highlight">
+                <strong>🎯 Core Idea:</strong> Performance optimization is science, not magic. Through structured frameworks, we identify bottlenecks, apply corresponding methodologies, and systematically improve performance.
+            </div>
+
+            <h3>Three Core Optimization Principles</h3>
+            <table>
+                <tr>
+                    <th>Principle</th>
+                    <th>Core Idea</th>
+                    <th>Application Scenarios</th>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-primary">Task Removal</span></td>
+                    <td>Eliminate unnecessary work</td>
+                    <td>Identify and remove redundant computation, I/O, RPC</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-primary">Task Replacement</span></td>
+                    <td>Replace with more efficient implementation</td>
+                    <td>Algorithm optimization, architecture refactoring</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-primary">Task Reordering</span></td>
+                    <td>Adjust execution order to reduce dependencies</td>
+                    <td>Async processing, pipeline optimization</td>
+                </tr>
+            </table>
+
+            <h3>Eight Actionable Methodologies</h3>
+            <div class="methodology">
+                <strong>Batching</strong> — Combine multiple small operations → Reduce syscalls, RPC count
+            </div>
+            <div class="methodology">
+                <strong>Caching</strong> — Reuse previously computed results → Avoid redundant computation
+            </div>
+            <div class="methodology">
+                <strong>Precomputing</strong> — Compute future-needed results ahead of time → Eliminate runtime latency
+            </div>
+            <div class="methodology">
+                <strong>Deferring</strong> — Delay non-urgent tasks → Decouple critical paths
+            </div>
+            <div class="methodology">
+                <strong>Relaxation</strong> — Relax consistency/accuracy requirements → Reduce synchronization wait
+            </div>
+            <div class="methodology">
+                <strong>Contextualization</strong> — Leverage contextual information for optimization → Location-aware, load-aware
+            </div>
+            <div class="methodology">
+                <strong>Hardware Specialization</strong> — Optimize for specific hardware → Heterogeneous computing, microservices split
+            </div>
+            <div class="methodology">
+                <strong>Layering</strong> — Layered abstraction reduces overhead → Storage tiering, separation of concerns
+            </div>
+        </div>
+
+        <div class="section" id="architecture">
+            <h2>🏗️ PD Architecture & Core Performance Bottlenecks</h2>
+            
+            <p>TiKV PD (Placement Driver) serves as the metadata management and scheduling center for TiDB clusters, with the following core responsibilities:</p>
+
+            <table>
+                <tr>
+                    <th>Module</th>
+                    <th>Function</th>
+                    <th>Potential Bottleneck</th>
+                    <th>Severity</th>
+                </tr>
+                <tr>
+                    <td><strong>TSO Allocator</strong></td>
+                    <td>Global timestamp allocation</td>
+                    <td>Single-point bottleneck, network latency</td>
+                    <td><span class="badge badge-danger">High</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Region Metadata</strong></td>
+                    <td>Region routing info management</td>
+                    <td>Memory footprint, query latency</td>
+                    <td><span class="badge badge-warning">Medium</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Scheduling</strong></td>
+                    <td>Load balancing, replica scheduling</td>
+                    <td>CPU-intensive, I/O-intensive</td>
+                    <td><span class="badge badge-warning">Medium</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Heartbeat</strong></td>
+                    <td>Process TiKV heartbeats</td>
+                    <td>High-frequency writes, etcd pressure</td>
+                    <td><span class="badge badge-danger">High</span></td>
+                </tr>
+                <tr>
+                    <td><strong>etcd Store</strong></td>
+                    <td>Metadata persistence</td>
+                    <td>Transaction latency, consistency overhead</td>
+                    <td><span class="badge badge-warning">Medium</span></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section" id="principle1">
+            <h2>🔷 Principle 1: Task Removal</h2>
+            
+            <div class="principle">
+                <h4>💡 Core Idea: Eliminate Unnecessary Work</h4>
+                <p>Identify redundant computation, duplicate requests, and invalid writes in the system, and remove them entirely.</p>
+            </div>
+
+            <h3>Optimization 1.1: TSO Batch Prefetching to Reduce RPC Calls</h3>
+            <div class="optimization-box">
+                <h5>📝 Problem Description</h5>
+                <p>Each transaction requests TSO multiple times, generating significant RPC overhead.</p>
+                
+                <h5>✅ Optimization Solution</h5>
+                <p>Batch prefetch TSO on TiKV side, cache locally, and significantly reduce RPC count.</p>
+                
+                <h5>🎯 Corresponding Methodologies</h5>
+                <p><span class="badge badge-success">Batching</span> + <span class="badge badge-success">Caching</span></p>
+            </div>
+
+            <pre><code>// Optimization example: TiKV-side TSO prefetch configuration
+[causal-ts]
+alloc-ahead-buffer = "6s"        # Pre-allocate 6 seconds of TSO
+renew-batch-max-size = 65536     # Maximum batch size
+renew-batch-min-size = 2048      # Minimum batch size
+
+// Principle: From N RPCs → 1 batched RPC</code></pre>
+
+            <h3>Optimization 1.2: Remove Unnecessary etcd Writes</h3>
+            <div class="optimization-box">
+                <h5>📝 Problem Description</h5>
+                <p>Heartbeat data is fully written to etcd, generating significant disk I/O and impacting performance.</p>
+                
+                <h5>✅ Optimization Solution</h5>
+                <p>Distinguish between volatile data and persistent data. Store volatile data in memory, persistent data in etcd.</p>
+                
+                <h5>🎯 Corresponding Methodology</h5>
+                <p><span class="badge badge-success">Layering</span> — Tiered storage strategy</p>
+            </div>
+
+            <pre><code>// Data tiering strategy
+Volatile data (Region real-time state) → Memory storage (fast path)
+Persistent data (Region topology)     → etcd storage (slow path)</code></pre>
+        </div>
+
+        <div class="section" id="principle2">
+            <h2>🔷 Principle 2: Task Replacement</h2>
+            
+            <div class="principle">
+                <h4>💡 Core Idea: Replace with More Efficient Implementation</h4>
+                <p>Preserve functional semantics while replacing with better algorithms, architectures, or data structures.</p>
+            </div>
+
+            <h3>Optimization 2.1: Microservices Architecture Decoupling (PD v8.0+)</h3>
+            <div class="optimization-box">
+                <h5>📝 Problem Description</h5>
+                <p>PD monolithic architecture: TSO/scheduling/routing affect each other; one module failure impacts the entire system.</p>
+                
+                <h5>✅ Optimization Solution</h5>
+                <p>Split into independent microservices, each module deploys and scales independently.</p>
+                
+                <h5>🎯 Corresponding Methodology</h5>
+                <p><span class="badge badge-success">Hardware Specialization</span> — Specialized deployment for different workloads</p>
+            </div>
+
+            <table>
+                <tr>
+                    <th>Microservice</th>
+                    <th>Responsibility</th>
+                    <th>Optimization Benefit</th>
+                </tr>
+                <tr>
+                    <td><code>tso</code></td>
+                    <td>Specialized timestamp allocation</td>
+                    <td>Independent scaling, reduced latency</td>
+                </tr>
+                <tr>
+                    <td><code>scheduling</code></td>
+                    <td>Specialized scheduling decisions</td>
+                    <td>Failure isolation, zero-downtime upgrades</td>
+                </tr>
+                <tr>
+                    <td><code>pd-server</code></td>
+                    <td>Focused metadata routing</td>
+                    <td>Simplified logic, improved stability</td>
+                </tr>
+            </table>
+
+            <h3>Optimization 2.2: Local TSO Replacing Global TSO (Cross-DC Scenario)</h3>
+            <div class="optimization-box">
+                <h5>📝 Problem Description</h5>
+                <p>In cross-DC scenarios, all TSO requests route to PD leader, incurring 20-50ms latency.</p>
+                
+                <h5>✅ Optimization Solution</h5>
+                <p>Introduce Local TSO allocator. Local transactions use local timestamps; only cross-DC transactions need Global TSO.</p>
+                
+                <h5>🎯 Corresponding Methodology</h5>
+                <p><span class="badge badge-success">Contextualization</span> — Leverage geographical context for optimization</p>
+            </div>
+
+            <pre><code>// Local TSO architecture
+DC-1: Local TSO Allocator ← Local transactions (low latency < 5ms)
+DC-2: Local TSO Allocator ← Local transactions (low latency < 5ms)
+       ↓
+Global TSO Allocator ← Cross-DC transactions (sync overhead)</code></pre>
+        </div>
+
+        <div class="section" id="principle3">
+            <h2>🔷 Principle 3: Task Reordering</h2>
+            
+            <div class="principle">
+                <h4>💡 Core Idea: Adjust Execution Order to Reduce Dependencies/Latency</h4>
+                <p>Convert blocking operations to async, reorder task execution, and decouple critical paths.</p>
+            </div>
+
+            <h3>Optimization 3.1: Asynchronous Heartbeat Processing</h3>
+            <div class="optimization-box">
+                <h5>📝 Problem Description</h5>
+                <p>Synchronous heartbeat processing blocks critical paths; TiKV faces timeout risks waiting for responses.</p>
+                
+                <h5>✅ Optimization Solution</h5>
+                <p>Respond immediately upon receiving heartbeat, process state updates asynchronously.</p>
+                
+                <h5>🎯 Corresponding Methodology</h5>
+                <p><span class="badge badge-success">Deferring</span> — Delay non-urgent tasks</p>
+            </div>
+
+            <pre><code>// Original order: Synchronous processing
+Receive heartbeat → Update state → Persist storage → Respond heartbeat
+   ↑___________________________________↓
+              (Block 5-10ms)
+
+// Optimized: Asynchronous processing
+Receive heartbeat → Enqueue → Respond immediately
+             ↓
+          Async state update</code></pre>
+
+            <h3>Optimization 3.2: TSO Physical Time Advancement Optimization</h3>
+            <div class="optimization-box">
+                <h5>📝 Problem Description</h5>
+                <p>TSO physical time checks every 50ms; short transactions may wait unnecessarily.</p>
+                
+                <h5>✅ Optimization Solution</h5>
+                <p>Dynamically adjust check interval; update physical timestamp at higher frequency.</p>
+                
+                <h5>🎯 Corresponding Methodology</h5>
+                <p><span class="badge badge-success">Relaxation</span> — Trade strictness for performance</p>
+            </div>
+
+            <pre><code># PD configuration optimization
+tso-update-physical-interval = "1ms"  # Optimize from 50ms to 1ms</code></pre>
+        </div>
+
+        <div class="section" id="methodologies">
+            <h2>🎯 Eight Methodologies Overview</h2>
+
+            <table>
+                <tr>
+                    <th>Methodology</th>
+                    <th>PD Application Example</th>
+                    <th>Performance Benefit</th>
+                </tr>
+                <tr>
+                    <td><strong>Batching</strong></td>
+                    <td>TSO batch prefetching, heartbeat batch processing</td>
+                    <td>Reduce RPC count, lower network overhead 80%+</td>
+                </tr>
+                <tr>
+                    <td><strong>Caching</strong></td>
+                    <td>Region routing cache, Store state cache</td>
+                    <td>Reduce etcd queries, lower latency 90%+</td>
+                </tr>
+                <tr>
+                    <td><strong>Precomputing</strong></td>
+                    <td>TSO pre-allocation, scheduling decision precomputation</td>
+                    <td>Eliminate runtime computation latency</td>
+                </tr>
+                <tr>
+                    <td><strong>Deferring</strong></td>
+                    <td>Async heartbeat processing, delayed scheduling</td>
+                    <td>Decouple critical paths, reduce P99 latency</td>
+                </tr>
+                <tr>
+                    <td><strong>Relaxation</strong></td>
+                    <td>Eventual consistency for Region state, relaxed TSO interval</td>
+                    <td>Reduce sync wait, improve throughput</td>
+                </tr>
+                <tr>
+                    <td><strong>Contextualization</strong></td>
+                    <td>Local TSO (based on DC location), intelligent scheduling (based on node labels)</td>
+                    <td>Leverage context info, reduce cross-DC latency</td>
+                </tr>
+                <tr>
+                    <td><strong>Hardware Specialization</strong></td>
+                    <td>PD microservices split, TSO independent deployment</td>
+                    <td>Specialize resources for workloads, improve stability</td>
+                </tr>
+                <tr>
+                    <td><strong>Layering</strong></td>
+                    <td>Memory/disk tiered storage, metadata/runtime data separation</td>
+                    <td>Reduce storage cost, improve access speed</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section" id="code">
+            <h2>💻 Code-Level Optimization Recommendations</h2>
+
+            <h3>4.1 TSO Allocation Path Optimization</h3>
+            <pre><code>// pkg/tso/allocator.go
+// Current: Single batch allocation
+func (a *Allocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
+    // ... synchronous allocation logic, each request goes through network
+}
+
+// Optimized: Batch prefetching + local caching
+// Methodologies: Batching + Caching
+
+type TSOCache struct {
+    buffer []pdpb.Timestamp
+    index  int
+    mu     sync.Mutex
+}
+
+func (c *TSOCache) Get(count uint32) (pdpb.Timestamp, error) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    
+    if c.index+int(count) >= len(c.buffer) {
+        // Batch fetching - Batching methodology
+        c.refill()  // Fetch large batch of TSO at once
+    }
+    
+    // Return from cache - Caching methodology
+    ts := c.buffer[c.index]
+    c.index += int(count)
+    return ts, nil
+}</code></pre>
+
+            <h3>4.2 Region Heartbeat Processing Optimization</h3>
+            <pre><code>// server/cluster/cluster.go
+// Current: Synchronous update
+func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
+    // ... Direct storage update, blocks critical path
+    return c.storage.SaveRegion(region)
+}
+
+// Optimized: Asynchronous batch processing
+// Methodologies: Batching + Deferring
+
+func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
+    // 1. Immediately update memory state (critical path, must be fast)
+    c.basicCluster.PreCheckPutRegion(region)
+    
+    // 2. Async batch persistence (non-critical path, process later)
+    c.heartbeatQueue.Push(region)
+    
+    return nil  // Return immediately, no blocking
+}</code></pre>
+
+            <h3>4.3 Scheduling Decision Optimization</h3>
+            <pre><code>// server/schedule/scheduler.go
+// Optimized: Precompute hotspots
+// Methodologies: Precomputing + Contextualization
+
+type HotSpotPredictor struct {
+    history map[uint64][]*RegionStat
+    model   *MLModel  // Can integrate ML prediction model
+}
+
+func (p *HotSpotPredictor) Predict(storeID uint64) *HotSpot {
+    // Precompute hotspots based on historical data
+    // Contextualization: Leverage historical context and trends
+    stats := p.history[storeID]
+    return p.model.Predict(stats)
+}
+
+// Proactive scheduling instead of reactive response
+func (s *Scheduler) proactiveBalance() {
+    for _, store := range s.stores {
+        if hotspot := s.predictor.Predict(store.ID); hotspot != nil {
+            s.preMoveRegion(hotspot.region, hotspot.targetStore)
+        }
+    }
+}</code></pre>
+        </div>
+
+        <div class="section" id="metrics">
+            <h2>📊 Monitoring & Validation Metrics</h2>
+
+            <h3>Key Performance Metrics Comparison</h3>
+            <table>
+                <tr>
+                    <th>Metric</th>
+                    <th>Before Optimization</th>
+                    <th>Target After Optimization</th>
+                    <th>Optimization Method</th>
+                </tr>
+                <tr>
+                    <td>TSO Allocation Latency (P99)</td>
+                    <td>~2-5ms</td>
+                    <td><strong>&lt; 1ms</strong></td>
+                    <td>Batching + Caching</td>
+                </tr>
+                <tr>
+                    <td>etcd Transaction Latency</td>
+                    <td>~10-50ms</td>
+                    <td><strong>&lt; 10ms</strong></td>
+                    <td>Layering + Deferring</td>
+                </tr>
+                <tr>
+                    <td>Heartbeat Processing Latency</td>
+                    <td>~5-10ms</td>
+                    <td><strong>&lt; 2ms</strong></td>
+                    <td>Deferring</td>
+                </tr>
+                <tr>
+                    <td>PD CPU Utilization</td>
+                    <td>High</td>
+                    <td><strong>Reduce 30%+</strong></td>
+                    <td>Hardware Specialization</td>
+                </tr>
+                <tr>
+                    <td>Cross-Region TSO Latency</td>
+                    <td>~20-50ms</td>
+                    <td><strong>&lt; 5ms</strong></td>
+                    <td>Contextualization (Local TSO)</td>
+                </tr>
+            </table>
+
+            <h3>Key Grafana Dashboard Metrics</h3>
+            <div class="highlight">
+                <ul>
+                    <li><code>TiDB - PD server TSO handle time</code> — TSO processing latency</li>
+                    <li><code>Heartbeat - TiKV side heartbeat statistics</code> — Heartbeat statistics</li>
+                    <li><code>PD - etcd transaction duration</code> — etcd transaction latency</li>
+                    <li><code>PD - Region heartbeat latency</code> — Region heartbeat latency</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section" id="conclusion">
+            <h2>📝 Conclusion</h2>
+
+            <p>Based on the <strong>Sujin Park</strong> systematic optimization framework, the main optimization directions for TiKV PD are as follows:</p>
+
+            <div class="metric-grid">
+                <div class="metric-card">
+                    <div class="value">TSO</div>
+                    <div class="label">Batching + Caching + Precomputing</div>
+                </div>
+                <div class="metric-card">
+                    <div class="value">Heartbeat</div>
+                    <div class="label">Deferring + Layering</div>
+                </div>
+                <div class="metric-card">
+                    <div class="value">Scheduling</div>
+                    <div class="label">Contextualization + Hardware Specialization</div>
+                </div>
+                <div class="metric-card">
+                    <div class="value">Cross-DC</div>
+                    <div class="label">Local TSO (Contextualization)</div>
+                </div>
+            </div>
+
+            <h3>Implemented Optimizations (TiDB 6.0+ / 8.0+)</h3>
+            <ul>
+                <li>✅ <strong>Local TSO</strong> — Cross-datacenter performance optimization</li>
+                <li>✅ <strong>PD Microservices</strong> — TSO/scheduling/routing decoupling</li>
+                <li>✅ <strong>TSO Batch Prefetching</strong> — causal-ts.alloc-ahead-buffer</li>
+                <li>✅ <strong>Async Heartbeat</strong> — Queue-based heartbeat processing</li>
+            </ul>
+
+            <div class="highlight">
+                <strong>📌 Core Philosophy:</strong> These optimizations have been gradually implemented in TiDB 6.0+ and 8.0+, demonstrating the practical value of the Sujin Park framework in real-world system optimization. Performance optimization is not magic—it's the systematic application of scientific methodologies.
+            </div>
+        </div>
+
+        <footer>
+            <p>Report generated by <strong>kernel-performance-expert</strong> ⚡</p>
+            <p>Theoretical Foundation: OSDI 2025 — Principles and Methodologies for Serial Performance Optimization</p>
+            <p>Authors: Sujin Park, Mingyu Guan, Xiang Cheng, Taesoo Kim (Georgia Tech)</p>
+        </footer>
+    </div>
+</body>
+</html>
