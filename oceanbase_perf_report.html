@@ -1,0 +1,669 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OceanBase 性能优化分析报告 | OSDI 2025 方法论应用</title>
+    <style>
+        :root {
+            --primary: #1a73e8;
+            --primary-dark: #1557b0;
+            --secondary: #34a853;
+            --accent: #fbbc04;
+            --danger: #ea4335;
+            --bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --text: #202124;
+            --text-secondary: #5f6368;
+            --border: #dadce0;
+            --shadow: 0 2px 8px rgba(60,64,67,0.1);
+            --shadow-hover: 0 4px 16px rgba(60,64,67,0.15);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+        .header { background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%); color: white; padding: 3rem 2rem; text-align: center; position: relative; overflow: hidden; }
+        .header::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.3; }
+        .header h1 { font-size: 2.5rem; margin-bottom: 0.5rem; position: relative; }
+        .header .subtitle { font-size: 1.1rem; opacity: 0.9; position: relative; }
+        .header .meta { margin-top: 1.5rem; font-size: 0.9rem; opacity: 0.8; position: relative; }
+        .nav { background: var(--card-bg); padding: 1rem 2rem; box-shadow: var(--shadow); position: sticky; top: 0; z-index: 100; display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; }
+        .nav a { color: var(--text-secondary); text-decoration: none; padding: 0.5rem 1rem; border-radius: 20px; transition: all 0.3s; font-size: 0.9rem; font-weight: 500; }
+        .nav a:hover, .nav a.active { background: var(--primary); color: white; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        .card { background: var(--card-bg); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: var(--shadow); transition: box-shadow 0.3s; }
+        .card:hover { box-shadow: var(--shadow-hover); }
+        .card-title { font-size: 1.3rem; font-weight: 600; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+        .card-title .icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+        .grid-2 { grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); }
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }
+        .metric { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 12px; text-align: center; }
+        .metric.value-green { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+        .metric.value-orange { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .metric.value-blue { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .metric .number { font-size: 2rem; font-weight: 700; margin-bottom: 0.25rem; }
+        .metric .label { font-size: 0.85rem; opacity: 0.9; }
+        .tag { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; margin-right: 0.5rem; margin-bottom: 0.5rem; }
+        .tag-principle { background: #e3f2fd; color: #1565c0; }
+        .tag-methodology { background: #e8f5e9; color: #2e7d32; }
+        .tag-high { background: #ffebee; color: #c62828; }
+        .tag-medium { background: #fff3e0; color: #ef6c00; }
+        .tag-low { background: #e8eaf6; color: #3f51b5; }
+        .tag-batching { background: #fce4ec; color: #c2185b; }
+        .tag-caching { background: #f3e5f5; color: #7b1fa2; }
+        .tag-precomputing { background: #e0f2f1; color: #00695c; }
+        .tag-deferring { background: #fff8e1; color: #f57f17; }
+        .tag-relaxation { background: #efebe9; color: #4e342e; }
+        .tag-contextualization { background: #e8eaf6; color: #303f9f; }
+        .tag-hardware { background: #e0f7fa; color: #00838f; }
+        .tag-layering { background: #f1f8e9; color: #558b2f; }
+        .collapsible { background: var(--card-bg); border-radius: 12px; overflow: hidden; margin-bottom: 1rem; box-shadow: var(--shadow); }
+        .collapsible-header { padding: 1rem 1.5rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: linear-gradient(to right, #f8f9fa, white); border-bottom: 1px solid var(--border); transition: background 0.3s; }
+        .collapsible-header:hover { background: #e8eaf6; }
+        .collapsible-header h3 { font-size: 1rem; font-weight: 600; }
+        .collapsible-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+        .collapsible-content.active { max-height: 5000px; }
+        .collapsible-body { padding: 1.5rem; }
+        .toggle-icon { transition: transform 0.3s; }
+        .collapsible-header.active .toggle-icon { transform: rotate(180deg); }
+        pre { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 8px; overflow-x: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 0.85rem; line-height: 1.5; margin: 1rem 0; }
+        code { font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background: #f1f3f4; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; }
+        pre code { background: none; padding: 0; }
+        table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+        th { background: #f8f9fa; font-weight: 600; color: var(--text-secondary); }
+        tr:hover { background: #f8f9fa; }
+        .matrix { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 2rem 0; }
+        .matrix-cell { background: var(--card-bg); border-radius: 8px; padding: 1rem; min-height: 150px; border: 2px solid transparent; transition: all 0.3s; }
+        .matrix-cell:hover { border-color: var(--primary); transform: translateY(-2px); }
+        .matrix-cell.p0 { background: #ffebee; border-color: #ef5350; }
+        .matrix-cell.p1 { background: #fff3e0; border-color: #ffa726; }
+        .matrix-cell.p2 { background: #e8f5e9; border-color: #66bb6a; }
+        .matrix-cell.p3 { background: #e3f2fd; border-color: #42a5f5; }
+        .matrix-title { font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem; }
+        .matrix-items { font-size: 0.8rem; color: var(--text-secondary); }
+        .arch-diagram { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 16px; padding: 2rem; color: white; margin: 2rem 0; }
+        .arch-layers { display: flex; flex-direction: column; gap: 1rem; }
+        .arch-layer { background: rgba(255,255,255,0.15); backdrop-filter: blur(10px); border-radius: 12px; padding: 1.5rem; display: flex; align-items: center; gap: 1rem; }
+        .arch-layer-icon { width: 48px; height: 48px; background: rgba(255,255,255,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
+        .arch-layer-content { flex: 1; }
+        .arch-layer-title { font-weight: 600; font-size: 1.1rem; margin-bottom: 0.25rem; }
+        .arch-layer-desc { font-size: 0.9rem; opacity: 0.9; }
+        .filters { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; padding: 1rem; background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow); }
+        .filter-btn { padding: 0.5rem 1rem; border: 1px solid var(--border); background: white; border-radius: 20px; cursor: pointer; transition: all 0.3s; font-size: 0.85rem; }
+        .filter-btn:hover, .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        .benefits { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+        .benefit-item { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem; background: #f8f9fa; border-radius: 8px; }
+        .benefit-icon { width: 24px; height: 24px; background: var(--secondary); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; flex-shrink: 0; }
+        .progress-container { margin: 1rem 0; }
+        .progress-label { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; }
+        .progress-bar { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+        .progress-fill.high { background: linear-gradient(90deg, #f44336, #ff5722); }
+        .progress-fill.medium { background: linear-gradient(90deg, #ff9800, #ffc107); }
+        .progress-fill.low { background: linear-gradient(90deg, #4caf50, #8bc34a); }
+        .footer { text-align: center; padding: 2rem; color: var(--text-secondary); font-size: 0.9rem; border-top: 1px solid var(--border); margin-top: 2rem; }
+        @media (max-width: 768px) { .header h1 { font-size: 1.8rem; } .matrix { grid-template-columns: repeat(2, 1fr); } .grid-2 { grid-template-columns: 1fr; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-in { animation: fadeIn 0.5s ease forwards; }
+        section { margin-bottom: 3rem; }
+        h2 { font-size: 1.8rem; margin-bottom: 1.5rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--primary); display: inline-block; }
+        h3 { font-size: 1.3rem; margin: 1.5rem 0 1rem; color: var(--primary-dark); }
+        h4 { font-size: 1.1rem; margin: 1rem 0 0.5rem; color: var(--text); }
+        p { margin-bottom: 1rem; color: var(--text-secondary); }
+        ul, ol { margin-left: 1.5rem; margin-bottom: 1rem; }
+        li { margin-bottom: 0.5rem; }
+        .highlight-box { background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); border-left: 4px solid var(--primary); padding: 1.5rem; border-radius: 0 8px 8px 0; margin: 1.5rem 0; }
+        .warning-box { background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); border-left: 4px solid var(--accent); padding: 1.5rem; border-radius: 0 8px 8px 0; margin: 1.5rem 0; }
+        .success-box { background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-left: 4px solid var(--secondary); padding: 1.5rem; border-radius: 0 8px 8px 0; margin: 1.5rem 0; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1> OceanBase 性能优化分析报告</h1>
+        <p class="subtitle">基于 OSDI 2025《Principles and Methodologies for Serial Performance Optimization》方法论</p>
+        <p class="meta">分析日期: 2026年3月6日 | 分析对象: OceanBase Database v4.x | 方法论版本: v1.0</p>
+    </header>
+    
+    <nav class="nav">
+        <a href="#summary" class="active">执行摘要</a>
+        <a href="#architecture">架构分析</a>
+        <a href="#methodology">方法论应用</a>
+        <a href="#optimizations">优化建议</a>
+        <a href="#matrix">优先级矩阵</a>
+        <a href="#conclusion">总结</a>
+    </nav>
+    
+    <main class="container">
+        <!-- Section 1: Executive Summary -->
+        <section id="summary">
+            <h2> 执行摘要</h2>
+            
+            <div class="metrics">
+                <div class="metric value-green">
+                    <div class="number">18</div>
+                    <div class="label">识别的优化点</div>
+                </div>
+                <div class="metric value-blue">
+                    <div class="number">8</div>
+                    <div class="label">应用的方法论</div>
+                </div>
+                <div class="metric value-orange">
+                    <div class="number">25-40%</div>
+                    <div class="label">预期性能提升</div>
+                </div>
+                <div class="metric">
+                    <div class="number">3</div>
+                    <div class="label">核心优化原则</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">
+                    <span class="icon" style="background: #e3f2fd;"> </span>
+                    分析概述
+                </div>
+                <p>本报告基于 OSDI 2025 论文《Principles and Methodologies for Serial Performance Optimization》的三大原则（Task Removal、Task Replacement、Task Reordering）和八大可操作方法论，对 OceanBase 分布式数据库进行了全面的性能优化分析。</p>
+                
+                <div class="highlight-box">
+                    <strong>关键发现：</strong>OceanBase 的 LSM-Tree 存储引擎、分布式事务处理（Paxos-based 2PC）和 SQL 执行引擎存在显著优化空间。通过系统性地应用 OSDI 2025 方法论，预计可实现 25-40% 的端到端性能提升。
+                </div>
+                
+                <h4>核心优化领域</h4>
+                <div class="benefits">
+                    <div class="benefit-item">
+                        <div class="benefit-icon">1</div>
+                        <div><strong>存储引擎</strong><br><small>Compaction 优化、缓存策略、批量写入</small></div>
+                    </div>
+                    <div class="benefit-item">
+                        <div class="benefit-icon">2</div>
+                        <div><strong>事务引擎</strong><br><small>GTS 批量获取、2PC 延迟优化、锁粒度</small></div>
+                    </div>
+                    <div class="benefit-item">
+                        <div class="benefit-icon">3</div>
+                        <div><strong>SQL 引擎</strong><br><small>计划缓存、向量化执行、并行下推</small></div>
+                    </div>
+                    <div class="benefit-item">
+                        <div class="benefit-icon">4</div>
+                        <div><strong>分布式层</strong><br><small>RPC 批量化、数据本地化、网络优化</small></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="grid">
+                <div class="card">
+                    <div class="card-title">
+                        <span class="icon" style="background: #e8f5e9;">✅</span>
+                        当前优势
+                    </div>
+                    <ul>
+                        <li>LSM-Tree 架构天然支持高吞吐写入</li>
+                        <li>MVCC + 悲观锁混合并发控制</li>
+                        <li>Paxos 协议保证强一致性</li>
+                        <li>多层级缓存（Row Cache、Block Cache、Bloom Filter）</li>
+                        <li>向量化执行引擎</li>
+                        <li>共享无架构（Shared-nothing）支持线性扩展</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <div class="card-title">
+                        <span class="icon" style="background: #ffebee;">⚠️</span>
+                        潜在瓶颈
+                    </div>
+                    <ul>
+                        <li>Compaction 期间的性能抖动</li>
+                        <li>GTS 可能成为分布式事务瓶颈</li>
+                        <li>跨节点查询的网络开销</li>
+                        <li>MemTable 内存压力</li>
+                        <li>大量小查询的计划生成开销</li>
+                        <li>Row Cache 命中率波动</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Section 2: Architecture Analysis -->
+        <section id="architecture">
+            <h2> 架构分析</h2>
+            
+            <div class="arch-diagram">
+                <div class="arch-layers">
+                    <div class="arch-layer">
+                        <div class="arch-layer-icon">📝</div>
+                        <div class="arch-layer-content">
+                            <div class="arch-layer-title">SQL 层</div>
+                            <div class="arch-layer-desc">Parser → Resolver → Transformer → Optimizer → Code Generator → Executor<br><em>关键技术：Fast Parser、Plan Cache、向量化执行、并行执行</em></div>
+                        </div>
+                    </div>
+                    <div class="arch-layer">
+                        <div class="arch-layer-icon">🔄</div>
+                        <div class="arch-layer-content">
+                            <div class="arch-layer-title">事务层</div>
+                            <div class="arch-layer-desc">MVCC → Lock Manager → 2PC Coordinator → GTS → Paxos Log<br><em>关键技术：Paxos-based 2PC、Group Commit、Global Timestamp Service</em></div>
+                        </div>
+                    </div>
+                    <div class="arch-layer">
+                        <div class="arch-layer-icon">💾</div>
+                        <div class="arch-layer-content">
+                            <div class="arch-layer-title">存储层</div>
+                            <div class="arch-layer-desc">MemTable (B-tree + Hash) → Mini SSTable → Minor SSTable → Major SSTable<br><em>关键技术：LSM-Tree、分层 Compaction、多层级缓存、编码压缩</em></div>
+                        </div>
+                    </div>
+                    <div class="arch-layer">
+                        <div class="arch-layer-icon">🌐</div>
+                        <div class="arch-layer-content">
+                            <div class="arch-layer-title">分布式层</div>
+                            <div class="arch-layer-desc">RootService → OBServer → OBProxy → Paxos Group<br><em>关键技术：自动负载均衡、分区迁移、副本管理、多租户隔离</em></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="grid grid-2">
+                <div class="card">
+                    <div class="card-title">
+                        <span class="icon" style="background: #e3f2fd;">🔍</span>
+                        关键性能路径分析
+                    </div>
+                    <table>
+                        <tr>
+                            <th>路径</th>
+                            <th>关键组件</th>
+                            <th>潜在瓶颈</th>
+                        </tr>
+                        <tr>
+                            <td>点查 (Get)</td>
+                            <td>Row Cache → MemTable → SSTable</td>
+                            <td>Cache Miss、版本链过长</td>
+                        </tr>
+                        <tr>
+                            <td>范围扫描 (Scan)</td>
+                            <td>Block Cache → SSTable 合并</td>
+                            <td>读放大、Compaction 干扰</td>
+                        </tr>
+                        <tr>
+                            <td>写入 (Write)</td>
+                            <td>MemTable → Redo Log → Paxos</td>
+                            <td>GTS、锁竞争、刷盘延迟</td>
+                        </tr>
+                        <tr>
+                            <td>分布式事务</td>
+                            <td>2PC → GTS → Paxos 复制</td>
+                            <td>网络 RTT、协调者状态</td>
+                        </tr>
+                        <tr>
+                            <td>SQL 执行</td>
+                            <td>解析 → 优化 → 执行</td>
+                            <td>硬解析开销、计划选择</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="card">
+                    <div class="card-title">
+                        <span class="icon" style="background: #f3e5f5;">📈</span>
+                        当前性能指标
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>TPC-C tpmC</span>
+                            <span>707M (世界纪录)</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill high" style="width: 95%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>写入吞吐</span>
+                            <span>61M records/sec</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill high" style="width: 90%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>故障恢复时间 (RTO)</span>
+                            <span>&lt; 8 seconds</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill low" style="width: 20%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>数据丢失风险 (RPO)</span>
+                            <span>0</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill low" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>存储压缩比</span>
+                            <span>70-90% 节省</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill medium" style="width: 80%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Section 3: Methodology Application -->
+        <section id="methodology">
+            <h2> 方法论应用分析</h2>
+            
+            <div class="card">
+                <div class="card-title">
+                    <span class="icon" style="background: #e3f2fd;">📐</span>
+                    三大核心原则
+                </div>
+                <div class="grid">
+                    <div class="highlight-box" style="margin: 0;">
+                        <h4>🗑️ Task Removal（任务移除）</h4>
+                        <p>识别并消除不必要的工作。在 OceanBase 中应用：</p>
+                        <ul>
+                            <li>移除冗余的日志复制</li>
+                            <li>消除不必要的缓存查找</li>
+                            <li>跳过无意义的版本链遍历</li>
+                        </ul>
+                    </div>
+                    <div class="highlight-box" style="margin: 0;">
+                        <h4>🔄 Task Replacement（任务替换）</h4>
+                        <p>用更高效的实现替换低效操作。在 OceanBase 中应用：</p>
+                        <ul>
+                            <li>替换串行 GTS 获取为批量获取</li>
+                            <li>用自适应算法替换固定策略</li>
+                            <li>用向量化操作替换逐行处理</li>
+                        </ul>
+                    </div>
+                    <div class="highlight-box" style="margin: 0;">
+                        <h4>📋 Task Reordering（任务重排序）</h4>
+                        <p>调整执行顺序以减少依赖或提高并行性。在 OceanBase 中应用：</p>
+                        <ul>
+                            <li>重排序 Compaction 任务</li>
+                            <li>调整 Paxos 复制顺序</li>
+                            <li>优化 2PC 阶段顺序</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <h3>八大可操作方法论详解</h3>
+            
+            <!-- Batching -->
+            <div class="collapsible">
+                <div class="collapsible-header" onclick="toggle(this)">
+                    <h3><span class="tag tag-batching">Batching</span> 批处理优化</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-body">
+                        <p><strong>核心思想：</strong>合并多个小操作成大操作，减少开销（系统调用、网络往返、锁获取）</p>
+                        
+                        <h4>OceanBase 应用场景</h4>
+                        <table>
+                            <tr>
+                                <th>应用点</th>
+                                <th>当前实现</th>
+                                <th>优化潜力</th>
+                            </tr>
+                            <tr>
+                                <td>GTS 获取</td>
+                                <td>每个事务单独请求 GTS</td>
+                                <td>高 - 可批量获取</td>
+                            </tr>
+                            <tr>
+                                <td>Paxos 日志复制</td>
+                                <td>Group Commit 已部分实现</td>
+                                <td>中 - 可进一步优化批大小</td>
+                            </tr>
+                            <tr>
+                                <td>RPC 调用</td>
+                                <td>单次 RPC 较多</td>
+                                <td>高 - 合并跨节点请求</td>
+                            </tr>
+                            <tr>
+                                <td>索引构建</td>
+                                <td>逐行插入</td>
+                                <td>高 - 批量宏块写入</td>
+                            </tr>
+                        </table>
+                        
+                        <div class="success-box">
+                            <strong>预期收益：</strong>通过 Batching 优化，预计可减少 30-50% 的网络往返和系统调用开销，特别是在高并发短事务场景下。
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Caching -->
+            <div class="collapsible">
+                <div class="collapsible-header" onclick="toggle(this)">
+                    <h3><span class="tag tag-caching">Caching</span> 缓存优化</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-body">
+                        <p><strong>核心思想：</strong>缓存计算结果避免重复计算</p>
+                        
+                        <h4>当前缓存层级</h4>
+                        <ul>
+                            <li><strong>Row Cache:</strong> 单行查询结果缓存</li>
+                            <li><strong>Block Cache:</strong> 数据块缓存</li>
+                            <li><strong>Bloom Filter Cache:</strong> 空查过滤缓存</li>
+                            <li><strong>Plan Cache:</strong> 执行计划缓存</li>
+                        </ul>
+                        
+                        <h4>优化机会</h4>
+                        <div class="warning-box">
+                            <strong>问题识别：</strong>Row Cache 命中率波动，版本链过长时缓存失效频繁
+                        </div>
+                        <ul>
+                            <li>引入自适应缓存替换策略（ARC/LIRS 替代 LRU）</li>
+                            <li>多级缓存一致性优化</li>
+                            <li>预取策略优化（基于访问模式预测）</li>
+                            <li>缓存预热优化（Compaction 期间预加载）</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Precomputing -->
+            <div class="collapsible">
+                <div class="collapsible-header" onclick="toggle(this)">
+                    <h3><span class="tag tag-precomputing">Precomputing</span> 预计算优化</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-body">
+                        <p><strong>核心思想：</strong>提前计算可能需要的值</p>
+                        
+                        <h4>OceanBase 应用机会</h4>
+                        <table>
+                            <tr>
+                                <th>预计算点</th>
+                                <th>说明</th>
+                                <th>收益</th>
+                            </tr>
+                            <tr>
+                                <td>Bloom Filter</td>
+                                <td>Compaction 时预计算 SSTable 层 Bloom Filter</td>
+                                <td>减少点查磁盘 I/O</td>
+                            </tr>
+                            <tr>
+                                <td>统计信息</td>
+                                <td>后台预计算表/列统计信息</td>
+                                <td>优化器选择更优计划</td>
+                            </tr>
+                            <tr>
+                                <td>物化视图</td>
+                                <td>预计算聚合结果</td>
+                                <td>OLAP 查询加速</td>
+                            </tr>
+                            <tr>
+                                <td>分区裁剪</td>
+                                <td>预计算分区范围</td>
+                                <td>减少扫描分区数</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Deferring -->
+            <div class="collapsible">
+                <div class="collapsible-header" onclick="toggle(this)">
+                    <h3><span class="tag tag-deferring">Deferring</span> 延迟执行优化</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-body">
+                        <p><strong>核心思想：</strong>延迟非紧急工作到更合适时机</p>
+                        
+                        <h4>OceanBase 已有实践</h4>
+                        <ul>
+                            <li><strong>增量 Major Compaction:</strong> 延迟到业务低峰期执行</li>
+                            <li><strong>DDL 延迟执行:</strong> 添加列等 DDL 延迟到 Compaction 时处理</li>
+                        </ul>
+                        
+                        <h4>进一步优化机会</h4>
+                        <ul>
+                            <li><strong>异步索引构建:</strong> 进一步延迟非关键索引的构建</li>
+                            <li><strong>延迟统计更新:</strong> 小变更批量后统一更新统计</li>
+                            <li><strong>惰性日志刷盘:</strong> 非关键事务延迟刷盘（可控一致性降级）</li>
+                            <li><strong>批量垃圾回收:</strong> MVCC 版本批量清理而非实时</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Relaxation -->
+            <div class="collapsible">
+                <div class="collapsible-header" onclick="toggle(this)">
+                    <h3><span class="tag tag-relaxation">Relaxation</span> 语义放松优化</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-body">
+                        <p><strong>核心思想：</strong>放宽严格语义以换取性能</p>
+                        
+                        <h4>潜在优化方向</h4>
+                        <div class="warning-box">
+                            <strong>注意：</strong>Relaxation 需要谨慎应用，需评估对业务的影响
+                        </div>
+                        <ul>
+                            <li><strong>读己之写延迟:</strong> 允许跨节点读存在一定延迟</li>
+                            <li><strong>单调读放松:</strong> 从库读取允许一定程度的版本滞后</li>
+                            <li><strong>因果一致性选项:</strong> 提供因果一致性读写接口</li>
+                            <li><strong>Paxos 复制放松:</strong> 非关键数据异步复制</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Contextualization -->
+            <div class="collapsible">
+                <div class="collapsible-header" onclick="toggle(this)">
+                    <h3><span class="tag tag-contextualization">Contextualization</span> 上下文感知优化</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-body">
+                        <p><strong>核心思想：</strong>根据上下文选择最优策略</p>
+                        
+                        <h4>OceanBase 已有实现</h4>
+                        <ul>
+                            <li><strong>自适应 GROUP BY 下推:</strong> 根据采样数据决定是否下推</li>
+                            <li><strong>动态 Bloom Filter:</strong> 根据数据特征动态创建</li>
+                        </ul>
+                        
+                        <h4>扩展优化机会</h4>
+                        <ul>
+                            <li><strong>自适应 Compaction 策略:</strong> 根据负载选择 minor/major compaction 频率</li>
+                            <li><strong>上下文感知缓存:</strong> 根据查询模式动态调整缓存策略</li>
+                            <li><strong>自适应锁策略:</strong> 低冲突场景使用乐观锁替代悲观锁</li>
+                            <li><strong>负载感知的 GTS 批大小:</strong> 根据并发度动态调整</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Hardware Specialization -->
+            <div class="collapsible">
+                <div class="collapsible-header" onclick="toggle(this)">
+                    <h3><span class="tag tag-hardware">Hardware Specialization</span> 硬件特化优化</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-body">
+                        <p><strong>核心思想：</strong>利用特定硬件特性加速</p>
+                        
+                        <h4>硬件优化方向</h4>
+                        <table>
+                            <tr>
+                                <th>硬件</th>
+                                <th>优化机会</th>
+                                <th>预期收益</th>
+                            </tr>
+                            <tr>
+                                <td>SIMD (AVX-512)</td>
+                                <td>向量化执行、压缩/解压</td>
+                                <td>3-5x 吞吐量提升</td>
+                            </tr>
+                            <tr>
+                                <td>SPDK/NVMe</td>
+                                <td>用户态 I/O、轮询模式</td>
+                                <td>降低 50% I/O 延迟</td>
+                            </tr>
+                            <tr>
+                                <td>RDMA</td>
+                                <td>节点间零拷贝通信</td>
+                                <td>降低 80% 网络延迟</td>
+                            </tr>
+                            <tr>
+                                <td>Optane PMEM</td>
+                                <td>MemTable 持久化</td>
+                                <td>消除写放大</td>
+                            </tr>
+                            <tr>
+                                <td>DPU/IPU</td>
+                                <td>压缩/加密卸载</td>
+                                <td>释放 CPU 资源</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Layering -->
+            <div class="collapsible">
+                <div class="collapsible-header" onclick="toggle(this)">
+                    <h3><span class="tag tag-layering">Layering</span> 分层架构优化</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-body">
+                        <p><strong>核心思想：</strong>通过分层架构隔离和优化</p>
+                        
+                        <h4>OceanBase 分层现状</h4>
+                        <ul>
+                            <li><strong>已良好分层:</strong> SQL层、事务层、存储层、分布式层</li>
+                            <li><strong>优势:</strong> 独立扩展、故障隔离</li>
+                        </ul>
+                        
+                        <h4>优化机会</h4>
+                        <ul>
+                            <li><strong>存储格式分层:</strong> 热数据行存、冷数据列存</li>
+                            <li><strong>事务隔离层:</strong> 短事务快速路径 vs 长事务完整协议</li>
+                            <li><strong>查询执行分层:</strong> 简单查询短路 vs 复杂查询优化</li>
+                            <li><strong>网络通信分层:</strong> 控制平面与数据平面分离</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
